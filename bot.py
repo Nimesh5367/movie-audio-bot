@@ -8,7 +8,7 @@ import aiohttp
 
 API_ID = int(os.environ.get("18549346", "0"))
 API_HASH = os.environ.get("957c7beb34204ef223d799c4cc929669", "")
-BOT_TOKEN = os.environ.get("8940714085:AAHXhZ9ptdmL3KzTl28tWYaZl91aJVkgLhs", "")
+BOT_TOKEN = os.environ.get("AAHXhZ9ptdmL3KzTl28tWYaZl91aJVkgLhs", "")
 
 app = Client("movie_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
