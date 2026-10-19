@@ -1,10 +1,34 @@
-import urllib.parse  # Is module ko import section mein jodh dein (agar pehle se nahi hai)
+import asyncio
+import os
+import subprocess
+import time
+import urllib.parse
+from aiohttp import web
+import aiohttp
+from pyrogram import Client, filters
+
+# Render environment variables se credentials uthana
+API_ID = int(os.environ.get("API_ID", "0"))
+API_HASH = os.environ.get("API_HASH", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+
+app = Client("movie_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+
+def human_readable_size(size_bytes):
+  if size_bytes == 0:
+    return "0 B"
+  size_name = ("B", "KB", "MB", "GB", "TB")
+  i = 0
+  while size_bytes >= 1024 and i < len(size_name) - 1:
+    size_bytes /= 1024.0
+    i += 1
+  return f"{size_bytes:.2f} {size_name[i]}"
 
 
 async def download_file(url, output_file, message):
   start_time = time.time()
-
-  # URL ko properly encode/parse karne ke liye
+  # URL ko properly encode karna taaki special characters/spaces fail na ho
   safe_url = urllib.parse.quote(url, safe=":/?&=%-_.")
 
   headers = {
@@ -66,3 +90,117 @@ async def download_file(url, output_file, message):
               except Exception:
                 pass
   return True
+
+
+@app.on_message(filters.command("start"))
+async def start_handler(client, message):
+  await message.reply_text(
+      "👋 Hello!\n\nMujhe movie ki direct download link bhejiye. Main live"
+      " speed, size, aur percentage ke sath download karunga aur sirf **Hindi"
+      " audio** wali nayi link dunga!"
+  )
+
+
+@app.on_message(filters.text & ~filters.command("start"))
+async def link_handler(client, message):
+  url = message.text.strip()
+  if not url.startswith("http"):
+    await message.reply_text("❌ Kripya ek valid download link bhejiye!")
+    return
+
+  status_msg = await message.reply_text(
+      "📥 **Connecting to server and downloading...**"
+  )
+
+  input_file = "input_movie.mkv"
+  output_file = "output_hindi.mkv"
+
+  try:
+    # 1. Download file
+    success = await download_file(url, input_file, status_msg)
+    if not success:
+      return
+
+    await status_msg.edit_text(
+        "⚙️ **Processing with FFmpeg (Keeping only Hindi Audio)...**"
+    )
+
+    # 2. FFmpeg se sirf Hindi audio track rakhna aur video quality original rakhna
+    cmd = [
+        "ffmpeg",
+        "-i",
+        input_file,
+        "-map",
+        "0:v",
+        "-map",
+        "0:a:m:language:hin",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        output_file,
+        "-y",
+    ]
+
+    process = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+
+    if process.returncode != 0:
+      # Agar specific 'hin' tag na mile toh default pehla audio ya fallback try kar sakte hain
+      cmd_fallback = [
+          "ffmpeg",
+          "-i",
+          input_file,
+          "-map",
+          "0:v",
+          "-map",
+          "0:a:0",
+          "-c:v",
+          "copy",
+          "-c:a",
+          "aac",
+          output_file,
+          "-y",
+      ]
+      process = subprocess.run(
+          cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+      )
+      if process.returncode != 0:
+        await status_msg.edit_text(
+            "❌ FFmpeg processing error aa gaya!"
+        )
+        return
+
+    await status_msg.edit_text(
+        "✅ Movie process ho gayi hai! (Abhi upload ka feature joda jayega)"
+    )
+
+  except Exception as e:
+    await status_msg.edit_text(f"❌ Error aa gaya: {str(e)}")
+
+  finally:
+    # Cleanup temporary files
+    for f in [input_file, output_file]:
+      if os.path.exists(f):
+        os.remove(f)
+
+
+# Render ke port scan timeout error ko fix karne ke liye aiohttp web server
+async def handle(request):
+  return web.Response(text="Bot is running!")
+
+
+async def start_web_server():
+  app_web = web.Application()
+  app_web.add_routes([web.get("/", handle)])
+  runner = web.AppRunner(app_web)
+  await runner.setup()
+  site = web.TCPSite(runner, "0.0.0.0", 10000)
+  await site.start()
+
+
+if __name__ == "__main__":
+  loop = asyncio.get_event_loop()
+  loop.create_task(start_web_server())
+  app.run()
