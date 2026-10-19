@@ -1,5 +1,4 @@
-pyrogram
-tgcrypto
-requests
-gofile
-aiohttp
+pyrogram==2.0.106
+tgcrypto==1.2.5
+aiohttp==3.11.11
+static-ffmpeg==2.5
